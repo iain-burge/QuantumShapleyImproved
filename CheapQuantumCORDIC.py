@@ -1,6 +1,6 @@
 
-import time
 from tqdm import tqdm, trange
+import time
 from typing import Union
 
 from qiskit import QuantumCircuit as qc, QuantumRegister as qr
@@ -150,7 +150,7 @@ def bitsToIntList(string: str, n: Union[int, list[int]]) -> list[int]:
 
     l = []
     if type(n)==int:
-        l = [n] * (n//len(string))
+        l = [n] * (len(string)//n)
     elif type(n)==list:
         l = n
 
@@ -314,11 +314,10 @@ def quantumCORDIC(
     circuit = qc(tReg, xReg, yReg, multReg, dReg, name="asin(t)")
 
     #Set x = 1 in two's compliment fixed point for range=[-2,2)
-    circuit.x(xReg[-2])
+    circuit.x(xReg[:-1])
 
 
-    if not gate:
-        circuit.barrier(label="init_x") #temp
+    if not gate: circuit.barrier(label="init_x") #temp
 
     #CORDIC Iterations
     for i in range(1, n):
@@ -341,9 +340,7 @@ def quantumCORDIC(
             additionGate(tReg, yReg),
             tReg[:] + yReg[:]
         )
-
-        if not gate:
-            circuit.barrier(label=f"calc_d{i}") #temp
+        if not gate: circuit.barrier(label=f"calc_d{i}") #temp
 
 
         #Perform rotation
@@ -355,25 +352,28 @@ def quantumCORDIC(
         if not gate:
             circuit.barrier(label=f"ref_y{i} ") #temp
         # do the actual rotation
-        for _ in range(2):
+        for j in range(2):
             circuit.append(
                 shiftAdditionGate(xReg, yReg, i).inverse(),
                 xReg[:] + yReg[:]
             )
-            if not gate:
-                circuit.barrier(label=f"rot_A{i}") #temp
-            circuit.append(
-                multGate(yReg, multReg, 2*i),
-                yReg[:] + multReg[:]
-            )
-            if not gate:
-                circuit.barrier(label=f"rot_B{i}") #temp
+            if not gate: circuit.barrier(label=f"rot_A{i}") #temp
+            if j == 0:
+                circuit.append(
+                    multGate(yReg, multReg, 2*i).inverse(),
+                    yReg[:] + multReg[:]
+                )
+            else:
+                circuit.append(
+                    multGate(yReg, multReg, 2*i),
+                    yReg[:] + multReg[:]
+                )
+            if not gate: circuit.barrier(label=f"rot_B{i}") #temp
             circuit.append(
                 shiftAdditionGate(yReg, xReg, i),
                 yReg[:] + xReg[:] 
             )
-            if not gate:
-                circuit.barrier(label=f"rot_C{i}") #temp
+            if not gate: circuit.barrier(label=f"rot_C{i}") #temp
 
 
         # undo reflection depending on rotation direction
@@ -383,19 +383,16 @@ def quantumCORDIC(
 
         if not gate: circuit.barrier(label=f"unref_y{i}") #temp
 
-        #Compensate for imperfect rotation
-        circuit.append(
-            multGate(tReg, multReg, 2*i),
-            tReg[:] + multReg[:]
-        )
+        # #Compensate for imperfect rotation
+        # circuit.append(
+        #     multGate(tReg, multReg, 2*i),
+        #     tReg[:] + multReg[:]
+        # )
 
-        if not gate:
-            circuit.barrier(label=f"updt_t{i}") #temp
+        # if not gate: circuit.barrier(label=f"updt_t{i}") #temp
 
-    if gate:
-        return circuit.to_gate()
-    else:
-        return circuit
+    if gate: return circuit.to_gate()
+    else:    return circuit
 
 def qCleanCORDIC(
         tReg: qr, xReg: qr, yReg: qr, multReg: qr, dReg: qr, gate: bool = True
@@ -412,8 +409,8 @@ def qCleanCORDIC(
         Gate:
     """
     circuit = qc(tReg, xReg, yReg, multReg, dReg) 
-    circuit.h(tReg[:-1])
-    circuit.x(xReg[-2])
+    circuit.h(tReg[:])
+    circuit.x(xReg[:-1])
     circuit.append(
         additionGate(tReg, xReg).inverse(),
         tReg[:] + xReg[:]
@@ -464,17 +461,37 @@ def invRepairCORDIC(
         Gate:
     """
     n = len(tReg)
-    circuit = qc(tReg, xReg, yReg, multReg, dReg, name="cleanAux+Input")
+    circuit = qc(tReg, xReg, yReg, multReg, dReg, name="asin(t)")
 
     #Set x = 1 in two's compliment fixed point for range=[-2,2)
     circuit.x(xReg[-2])
 
 
-    if not gate:
-        circuit.barrier(label="init_x") #temp
+    if not gate: circuit.barrier(label="init_x") #temp
 
     #CORDIC Iterations
     for i in range(1, n):
+        # #Infer next rotation direction
+        # circuit.append(
+        #     # additionGate(tReg, yReg).control(ctrl_state=0).inverse(),
+        #     # xReg[-1:] + tReg[:] + yReg[:]
+        #     additionGate(tReg, yReg).inverse(),
+        #     tReg[:] + yReg[:]
+        # )
+        # # circuit.barrier(label="t-y") #temp
+        # circuit.ccx(xReg[-1], yReg[-1], dReg[-i])
+        # circuit.ccx(xReg[-1], tReg[-1], dReg[-i])
+        # circuit.cx(xReg[-1], dReg[-i])
+        # circuit.cx(tReg[-1], dReg[-i])
+        # circuit.append(
+        #     # additionGate(tReg, yReg).control(ctrl_state=0),
+        #     # xReg[-1:] + tReg[:] + yReg[:]
+        #     additionGate(tReg, yReg),
+        #     tReg[:] + yReg[:]
+        # )
+        # if not gate: circuit.barrier(label=f"calc_d{i}") #temp
+
+
         #Perform rotation
         # reflect depending on rotation direction
         for j in range(n):
@@ -484,25 +501,28 @@ def invRepairCORDIC(
         if not gate:
             circuit.barrier(label=f"ref_y{i} ") #temp
         # do the actual rotation
-        for _ in range(2):
+        for j in range(2):
             circuit.append(
                 shiftAdditionGate(xReg, yReg, i).inverse(),
                 xReg[:] + yReg[:]
             )
-            if not gate:
-                circuit.barrier(label=f"rot_A{i}") #temp
-            circuit.append(
-                multGate(yReg, multReg, 2*i),
-                yReg[:] + multReg[:]
-            )
-            if not gate:
-                circuit.barrier(label=f"rot_B{i}") #temp
+            if not gate: circuit.barrier(label=f"rot_A{i}") #temp
+            if j == 0:
+                circuit.append(
+                    multGate(xReg, multReg, 2*i).inverse(),
+                    xReg[:] + multReg[:]
+                )
+            else:
+                circuit.append(
+                    multGate(yReg, multReg, 2*i),
+                    yReg[:] + multReg[:]
+                )
+            if not gate: circuit.barrier(label=f"rot_B{i}") #temp
             circuit.append(
                 shiftAdditionGate(yReg, xReg, i),
                 yReg[:] + xReg[:] 
             )
-            if not gate:
-                circuit.barrier(label=f"rot_C{i}") #temp
+            if not gate: circuit.barrier(label=f"rot_C{i}") #temp
 
 
         # undo reflection depending on rotation direction
@@ -512,19 +532,17 @@ def invRepairCORDIC(
 
         if not gate: circuit.barrier(label=f"unref_y{i}") #temp
 
-        #Compensate for imperfect rotation
-        circuit.append(
-            multGate(tReg, multReg, 2*i),
-            tReg[:] + multReg[:]
-        )
+        # #Compensate for imperfect rotation
+        # circuit.append(
+        #     multGate(tReg, multReg, 2*i),
+        #     tReg[:] + multReg[:]
+        # )
 
-        if not gate:
-            circuit.barrier(label=f"updt_t{i}") #temp
+        if not gate: circuit.barrier(label=f"updt_t{i}") #temp
 
-    if gate:
-        return circuit.to_gate()
-    else:
-        return circuit
+    if gate: return circuit.to_gate()
+    else:    return circuit
+
 
 def dToTheta(d: str) -> float:
     theta = 0
@@ -544,9 +562,11 @@ def debugCORDIC(t: int, n_bits: int):
     xReg    = qr(n_bits, name="x")
     yReg    = qr(n_bits, name="y")
     multReg = qr(n_bits, name="mult")
-    dReg    = qr(n_bits-1, name="d")
+    dReg    = qr(n_bits, name="d")
 
     cordic  = qc(tReg, xReg, yReg, multReg, dReg)
+    for i, bit in enumerate(intToBits(t, n_bits)):
+        if bit == '1': cordic.x(i)
     cordic.append(
         quantumCORDIC(tReg, xReg, yReg, multReg, dReg, False),
         tReg[:] + xReg[:] + yReg[:] + multReg[:] + dReg[:]
@@ -560,15 +580,15 @@ def debugCORDIC(t: int, n_bits: int):
     #         vertical_compression="high")
     # plt.show()
 
-    inState = intListToBits([0,0,0,0,0], 4*[n_bits]+[n_bits])
+    inState = intListToBits([0,0,0,0,0], n_bits)
     state = Statevector.from_label(inState)
-    print(f"in:\t{stateToIntList(state, 4*[n_bits]+[n_bits])}")
+    print(f"in:\t{stateToIntList(state, n_bits)}")
 
     for unitary in cordic:
         if "barrier" in unitary.operation.name:
             state = state.evolve(sub)
             print(f"{unitary.operation.label}:"
-                  +f"\t{stateToIntList(state, 4*[n_bits]+[n_bits])}"
+                  +f"\t{stateToIntList(state, n_bits)}"
                   +f"\t\tGate Depth={sub.decompose(reps=32).depth()}"
             )
             sub.clear()
@@ -576,7 +596,7 @@ def debugCORDIC(t: int, n_bits: int):
             sub.append(unitary)
 
     print(f"out:\t{dToTheta(intToBits(
-        stateToIntList(state, 4*[n_bits]+[n_bits])[-1], n_bits-1))}")
+        stateToIntList(state, n_bits)[-1], n_bits))}")
 
 def debugShiftAdd(signedx: int, signedy: int, n_bits: int):
     xReg    = qr(n_bits, name="x")
@@ -650,9 +670,9 @@ def cordicComplexity(n_max: int) -> None:
             circuit.append(
                 quantumCORDIC(tReg, xReg, yReg, multReg, dReg, False), allReg
             )
-            cxs = (circuit.decompose(reps=32).count_ops())['cx']
-            cnotCount.append(cxs)
-            opComplexity.append(circuit.decompose(reps=32).depth()-cxs)
+            # cxs = (circuit.decompose(reps=32).count_ops())['cx']
+            # cnotCount.append(cxs)
+            # opComplexity.append(circuit.decompose(reps=32).depth()-cxs)
             n_val.append(i)
         except KeyboardInterrupt:
             break
@@ -674,8 +694,9 @@ def main():
     xReg    = qr(n_bits, name="x")
     yReg    = qr(n_bits, name="y")
     multReg = qr(n_bits, name="mult")
-    dReg    = qr(n_bits-1, name="d")
+    dReg    = qr(n_bits, name="d")
 
+    debugCORDIC(3, n_bits)
     allReg  = tReg[:] + xReg[:] + yReg[:] + multReg[:] + dReg[:]
 
     cordic = qc(tReg, xReg, yReg, multReg, dReg)
@@ -688,7 +709,7 @@ def main():
 
     print(f"start time: {time.ctime()}")
     state   = Statevector.from_label(
-            intListToBits([0,0,0,0,0], 4*[n_bits]+[n_bits-1]))
+            intListToBits([0,0,0,0,0], n_bits))
     state = state.evolve(cordic)
     print(f"end time:  {time.ctime()}")
 
@@ -704,14 +725,16 @@ def main():
     #     sub.clear()
 
     threshold = np.average(list(state.probabilities_dict().values()))
+    print(state.probabilities_dict())
     for key, val in state.probabilities_dict().items():
         if val < threshold: continue
+        print(bitsToIntList(key, n_bits))
         inputs.append(
-            twosCompToInt(bitsToIntList(key, 4*[n_bits]+[n_bits-1])[0],n_bits)
+            twosCompToInt(bitsToIntList(key, n_bits)[0],n_bits)
         )
         # print(stateToIntList)
         d = intToBits(
-            bitsToIntList(key, 4*[n_bits]+[n_bits-1])[-1], n_bits-1
+            bitsToIntList(key, n_bits)[-1], n_bits
         )       
         outputs.append(dToTheta(d))
         # print(key)
@@ -746,7 +769,7 @@ def main():
 
 
     inRange   = np.array(inputs)
-    expected  = np.arcsin(inRange/(2**(n_bits-2)))
+    expected  = np.arcsin(inRange/(2**(n_bits-1)))
     predicted = np.array(outputs)
     print([f'{val:.2f}' for val in outputs])
     print([(inputs[i],outputs[i]) for i in range(len(inputs))])
